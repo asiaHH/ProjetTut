@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 
 function _download() {
-    wget https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz && \
-    echo "Extracting..." && \
-    gzip -d en.openfoodfacts.org.products.csv.gz && \
-    echo "Done."
+    if ! [ -f en.openfoodfacts.org.products.csv ]
+    then
+        wget https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz && \
+        echo "Extracting..." && \
+        gzip -d en.openfoodfacts.org.products.csv.gz && \
+        echo "Done."
+    fi
 }
 
 function _fix() {
@@ -20,7 +23,9 @@ function _import() {
     if [ -f ready.csv ]
     then
         echo "Importing..."
-        psql
+        export PGPASSWORD='etudiant'
+        psql -U etudiant madm2023 -f import.sql
+        echo "Done."
     fi
 }
 
