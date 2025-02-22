@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 
+_lang=fr
+_file=$_lang.openfoodfacts.org.products.csv
+
 function _download() {
-    if ! [ -f en.openfoodfacts.org.products.csv ]
+    if ! [ -f $_file ]
     then
-        if ! [ -f en.openfoodfacts.org.products.csv.gz ]
+        if ! [ -f $_file.gz ]
         then
-            wget https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz
+            wget https://static.openfoodfacts.org/data/$_file.gz
         fi
         echo "Extracting..." && \
-        gzip -d en.openfoodfacts.org.products.csv.gz && \
+        gzip -d $_file.gz && \
         echo "Done."
     fi
 }
@@ -17,7 +20,7 @@ function _fix() {
     if ! [ -f col.txt ]
     then
         echo "Fixing..."
-        cat en.openfoodfacts.org.products.csv | tr '"' '_' > ready.csv
+        cat $_file | tr '"' '_' > ready.csv
         head -n 1 ready.csv | tr '\t' '\n' | tr '-' '_' > col.txt
         echo "Fixed."
     fi
@@ -43,12 +46,23 @@ function _stats() {
     then
         echo "Stats..."
         # For each column, we select all distinct values and count their occurences and store it in a new table called off_stats_colname
-        cat col.txt | awk '{print "DROP TABLE IF EXISTS off_stats_"$1";CREATE TABLE off_stats_"$1" AS SELECT "$1", COUNT(*) FROM off_origin GROUP BY "$1";"}' > stats.sql
+        cat col.txt | awk '{print "DROP TABLE IF EXISTS off_origin_stats_"$1";CREATE TABLE off_origin_stats_"$1" AS SELECT "$1", COUNT(*) FROM off_origin GROUP BY "$1";"}' > stats.sql
         export PGPASSWORD='gb232322' && \
         psql -U gb232322 gb232322 < stats.sql && \
         echo "Done."
     fi
 }
+
+function _export() {
+    if ! [ -f export.sql ]
+    then
+        echo "Exporting..."
+        cat col.txt | awk '{print "\copy off_origin_stats_"$1" TO off_origin_stats_"$1".csv WITH (FORMAT csv, HEADER true);"}' > export.sql
+        export PGPASSWORD='gb232322' && \
+        psql -U gb232322 gb232322 < export.sql && \
+        echo "Done."
+    fi
+}       
 
 mkdir -p data && cd data
 
@@ -56,5 +70,6 @@ _download
 _fix
 _import
 _stats
+_export
 
 cd -
