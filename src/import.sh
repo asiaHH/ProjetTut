@@ -66,6 +66,8 @@ function _export() {
 
 mkdir -p data && cd data
 
+echo "_lang=$_lang" > config.txt
+
 _download
 _fix
 _import
