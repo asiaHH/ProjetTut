@@ -43,7 +43,7 @@ function _import() {
     cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_alpha_"$1";CREATE TABLE off_alpha_"$1" AS SELECT id, "$1" FROM off_alpha;"}' >> $_sql_file
 
     echo "Unlisting..."
-    _to_unlist=$(echo {cities,data_quality_errors,ingredients{,_analysis},manufacturing_places,nutrient_levels,popularity}_tags \
+    _to_unlist=$(echo {brands,cities,data_quality_errors,ingredients{,_analysis},manufacturing_places,nutrient_levels,popularity}_tags \
                       {categories,countries,labels,origins,states,traces}{,_tags,_$_lang} emb_codes{,_tags} \
                       {additives,food_groups}{_tags,_$_lang} packaging{,_tags,_$_lang,_text} allergens purchase_places stores)
     echo $_to_unlist | tr ' ' '\n' | while read _c
