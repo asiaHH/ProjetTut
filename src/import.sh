@@ -5,6 +5,7 @@ _off_csv_file="$_lang.openfoodfacts.org.products.csv"
 _sql_file="request.sql"
 _csv_file="ready.csv"
 _col_file="column.txt"
+_schema_file="../schema.txt"
 
 function _download() {
     if ! [ -f $_col_file ]
@@ -33,9 +34,9 @@ function _import() {
     echo "\copy off_origin FROM '$_csv_file' WITH (FORMAT csv, DELIMITER E'\t', HEADER true);" >> $_sql_file
 
     echo "Stats (origin)..."
-    # For each column, we select all distinct values and count their occurences and store it in a new table called off_stats_colname and export the stats table to a csv file
-    cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_origin_stats_"$1";CREATE TABLE off_origin_stats_"$1" AS SELECT "$1", COUNT(*) FROM off_origin GROUP BY "$1";"}' >> $_sql_file
-    cat $_col_file | awk '{print "\copy off_origin_stats_"$1" TO off_origin_stats_"$1".csv WITH (FORMAT csv, HEADER true);"}' >> $_sql_file
+    # For each column, we select all distinct values and count their occurences and store it in a new table called off_stats_count_colname and export the stats table to a csv file
+    cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_origin_stats_count_"$1";CREATE TABLE off_origin_stats_count_"$1" AS SELECT "$1", COUNT(*) FROM off_origin GROUP BY "$1";"}' >> $_sql_file
+    cat $_col_file | awk '{print "\\copy off_origin_stats_count_"$1" TO off_origin_stats_count_"$1".csv WITH (FORMAT csv, HEADER true);"}' >> $_sql_file
 
     echo "Splitting..."
     # Add a new column id and split each column into a new table off_alpha_colname with columns id and colname
@@ -53,39 +54,71 @@ function _import() {
     done
 
     echo "Nullifying..."
-    # For each off_alpha_colname, update colname to NULL if it's an empty string
-    # or to 'unknown' if it's a value from the list _change_to_unknown
-    # or to 'null' if it's a value from the list _change_to_null
+    # For each off_alpha_colname, update colname to an empty string if it's only composed by ponctuation
+    # and change empty strings to 'unknown' if it's a value from a table of the list _change_to_unknown
+    # or to 'null' if it's a value from a table of the list _change_to_null
     _change_to_unknown=$(echo pnns_groups_{1,2} {nutriscore,environmental_score}_grade)
     _change_to_null=$(echo no_nutrition_data)
     cat $_col_file | while read _c
     do
         # Set the column to an empty string if it's a string containing only spaces or ponctuation
-        echo "UPDATE off_alpha_$_c SET $_c = '' WHERE TRIM('-;*?.()~[]{}' FROM $_c) = '';" >> $_sql_file
+        echo "UPDATE off_alpha_$_c SET $_c = TRIM(' -;\*\?.\(\)~\[\]\{\}' FROM $_c);" >> $_sql_file
         if [[ $_change_to_unknown == *"$_c"* ]]
         then
             echo "UPDATE off_alpha_$_c SET $_c = 'unknown' WHERE $_c = '';" >> $_sql_file
         elif [[ $_change_to_null == *"$_c"* ]]
         then
             echo "UPDATE off_alpha_$_c SET $_c = 'null' WHERE $_c = '';" >> $_sql_file
-        else
-            echo "UPDATE off_alpha_$_c SET $_c = NULL WHERE $_c = '';" >> $_sql_file
         fi
     done
 
     echo "Stats (alpha)..."
-    cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_alpha_stats_"$1";CREATE TABLE off_alpha_stats_"$1" AS SELECT "$1", COUNT(*) FROM off_alpha_"$1" GROUP BY "$1";"}' >> $_sql_file
-    cat $_col_file | awk '{print "\copy off_alpha_stats_"$1" TO off_alpha_stats_"$1".csv WITH (FORMAT csv, HEADER true);"}' >> $_sql_file
+    # For each off_alpha_colname, we count the occurences of each value and store it in a new table off_alpha_stats_count_colname
+    cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_alpha_stats_count_"$1";CREATE TABLE off_alpha_stats_count_"$1" AS SELECT "$1", COUNT(*) FROM off_alpha_"$1" GROUP BY "$1";"}' >> $_sql_file
+    cat $_col_file | awk '{print "\\copy off_alpha_stats_count_"$1" TO off_alpha_stats_count_"$1".csv WITH (FORMAT csv, HEADER true);"}' >> $_sql_file
+    # For each off_alpha_colname, we count the number of rows with the same id and store it in a new table off_alpha_stats_multiple_colname
+    cat $_col_file | awk '{print "DROP TABLE IF EXISTS off_alpha_stats_multiple_"$1";CREATE TABLE off_alpha_stats_multiple_"$1" AS SELECT id, COUNT(*) FROM off_alpha_"$1" GROUP BY id HAVING COUNT(*) > 1;"}' >> $_sql_file
+    cat $_col_file | awk '{print "\\copy off_alpha_stats_multiple_"$1" TO off_alpha_stats_multiple_"$1".csv WITH (FORMAT csv, HEADER true);"}' >> $_sql_file
+
+    echo "Recomposing..."
+    # For each line of the schema file, we create a new table off_beta_tablename with all columns from the schema file
+    # and we join all tables from the schema file using the id column
+    cat $_schema_file | while read _line
+    do
+        _table=$(echo $_line | awk '{print $1}')
+        _columns=$(echo $_line | awk '{for (i=2; i<=NF; i++) print $i}')
+        echo "DROP TABLE IF EXISTS off_beta_$_table;CREATE TABLE off_beta_$_table AS SELECT * " >> $_sql_file
+        _a=0
+        for _c in $_columns
+        do
+            _a=$((_a+1))
+            if [ $_a -eq 1 ]
+            then
+                echo "FROM off_alpha_$_c " >> $_sql_file
+            else
+                echo "JOIN off_alpha_$_c USING (id) " >> $_sql_file
+            fi
+        done
+        echo ";" >> $_sql_file
+    done
+
+    echo "Stats (beta)..."
+    # For each line of the schema file, we count the occurences of each value for each column and store it in a new table off_beta_stats_count_tablename_colname
+    cat $_schema_file | while read _line
+    do
+        _table=$(echo $_line | awk '{print $1}')
+        _columns=$(echo $_line | awk '{for (i=2; i<=NF; i++) print $i}')
+        echo "DROP TABLE IF EXISTS off_beta_stats_count_$_table;CREATE TABLE off_beta_stats_count_$_table AS SELECT " >> $_sql_file
+        for _c in $_columns
+        do
+            echo "$_c, COUNT(*) FROM off_beta_$_table GROUP BY $_c;" >> $_sql_file
+        done
+        echo "\\copy off_beta_stats_count_$_table TO off_beta_stats_count_$_table.csv WITH (FORMAT csv, HEADER true);" >> $_sql_file
+    done
 
     echo "Processing..."
     export PGPASSWORD='gb232322' && \
-    psql -U gb232322 gb232322 < $_sql_file && \
-    echo "Done."
-
-}
-
-function _recompose() {
-    echo "Recomposing..."
+    psql -h kafka -p 5432 -U gb232322 gb232322 < $_sql_file && \
     echo "Done."
 }
 
@@ -95,6 +128,5 @@ echo "_lang=$_lang" > config.txt
 
 _download
 _import
-#_recompose
 
 cd -
