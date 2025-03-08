@@ -25,9 +25,12 @@ function _download() {
 }
 
 function _import() {
+    echo "Cleaning..."
+    echo "" > $_sql_file
+
     echo "Importing..."
     # We create a table with the same columns as the csv file
-    echo -n "DROP TABLE IF EXISTS off_origin;CREATE TABLE off_origin (" > $_sql_file
+    echo -n "DROP TABLE IF EXISTS off_origin;CREATE TABLE off_origin (" >> $_sql_file
     cat $_col_file | awk '{print $1" TEXT NULL,"}' | tr '\n' ' ' | sed 's/,.$//' >> $_sql_file
     echo ");" >> $_sql_file
     # We import the csv file into the table
@@ -99,7 +102,7 @@ function _import() {
                 echo "JOIN off_alpha_$_c USING (id) " >> $_sql_file
             fi
         done
-        echo ";" >> $_sql_file
+        echo "ORDER BY id ;" >> $_sql_file
     done
 
     echo "Stats (beta)..."
@@ -108,12 +111,9 @@ function _import() {
     do
         _table=$(echo $_line | awk '{print $1}')
         _columns=$(echo $_line | awk '{for (i=2; i<=NF; i++) print $i}')
-        echo "DROP TABLE IF EXISTS off_beta_stats_count_$_table;CREATE TABLE off_beta_stats_count_$_table AS SELECT " >> $_sql_file
-        for _c in $_columns
-        do
-            echo "$_c, COUNT(*) FROM off_beta_$_table GROUP BY $_c;" >> $_sql_file
-        done
+        echo "DROP TABLE IF EXISTS off_beta_stats_count_$_table;CREATE TABLE off_beta_stats_count_$_table AS SELECT * FROM (SELECT id, COUNT(id) AS count FROM off_beta_$_table GROUP BY id ) WHERE count > 1 ; " >> $_sql_file
         echo "\\copy off_beta_stats_count_$_table TO off_beta_stats_count_$_table.csv WITH (FORMAT csv, HEADER true);" >> $_sql_file
+        echo "\\copy off_beta_$_table TO off_beta_$_table.csv WITH (FORMAT csv, HEADER true);" >> $_sql_file
     done
 
     echo "Processing..."
@@ -128,5 +128,10 @@ echo "_lang=$_lang" > config.txt
 
 _download
 _import
+
+mkdir -p origin alpha beta
+mv off_origin* origin
+mv off_alpha* alpha
+mv off_beta* beta
 
 cd -
